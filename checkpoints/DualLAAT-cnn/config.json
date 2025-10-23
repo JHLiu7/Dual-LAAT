@@ -1,0 +1,12 @@
+{
+  "dropout": 0.2,
+  "embedding_dim": 100,
+  "encoder_type": "cnn",
+  "kernel_size": 10,
+  "max_code_length": 48,
+  "max_note_length": 4000,
+  "num_filters": 256,
+  "num_mha_heads": 4,
+  "projection_dim": 256,
+  "vocab_size": 125762
+}

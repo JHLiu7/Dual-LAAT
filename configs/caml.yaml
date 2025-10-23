@@ -1,0 +1,43 @@
+## data 
+data_dir: '/path/to/data'
+data_w2v_dir: '/path/to/data/w2v'
+icd_type: 'iv_icd10'
+
+# this is for training: full, frequent
+icd_target_frequency: 'frequent' 
+
+negative_sampling_strategy: 'null'
+label_space: null
+scope_for_negative_samples: 'full' # full, frequent, terminology 
+
+## training
+debug: false
+silent: false
+seed: null
+
+output_dir: '/path/to/output'
+max_epochs: 20
+max_steps: -1
+gpus: 1
+max_input_length: 4000
+batch_size: 32
+accumulate_grad_batches: 1
+num_nodes: 1
+precision: 32
+num_warmup_steps: 2000
+lr: 0.001
+weight_decay: 0.0
+scheduler_type: 'linear'
+
+alternative_data_folder: null  # set to a folder name under data_dir if you want to use alternative data as augmentation
+alternative_icd_type: null  # set to a different icd_type if you want to use alternative data as augmentation
+
+## model
+model_type: 'caml'  
+kernel_size: 10
+num_filters: 256
+dropout: 0.2
+num_mha_heads: 1
+projection_dim: 256
+
+num_workers: 2
