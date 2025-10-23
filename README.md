@@ -18,7 +18,7 @@ DualLAAT is a deep learning model designed for multi-label classification of ICD
 
 ## Evaluation Results
 
-The evaluation is based on the SIGIR 2023 paper [Automated Medical Coding on MIMIC-III and MIMIC-IV: A Critical Review and Replicability Study](https://dl.acm.org/doi/10.1145/3539618.3591918). [[GitHub](https://github.com/JoakimEdin/medical-coding-reproducibility/tree/main)] Notice the baseline PLM-ICD is trained for each different MIMIC dataset, whereas our DualLAAT models handle the three datasets together.
+The evaluation is based on the SIGIR 2023 paper [Automated Medical Coding on MIMIC-III and MIMIC-IV: A Critical Review and Replicability Study](https://dl.acm.org/doi/10.1145/3539618.3591918). [[GitHub](https://github.com/JoakimEdin/medical-coding-reproducibility/tree/main)] Notice the baseline PLM-ICD is trained for each different MIMIC dataset, whereas our DualLAAT models handle the three datasets together. The DualLAAT model checkpoints are available in the folder `checkpoints`. 
 
 ### MIMIC-IV ICD-10
 
@@ -26,8 +26,8 @@ The evaluation is based on the SIGIR 2023 paper [Automated Medical Coding on MIM
 |---|---|---|---|---|---|---|---|---|
 | PLM-ICD (Previous SoTA) | 99.2±0.0 | 96.6±0.2 | 58.5±0.7 | 21.1±2.3 | 69.9±0.6 | 55.0±0.6 | 57.9±0.8 | 61.9±0.9 |
 | DualLAAT-cnn | 99.3±0.0 | 97.4±0.0 | 57.1±0.1 | 28.2±0.3 | 69.0±0.1 | 54.1±0.0 | 57.1±0.0 | 61.2±0.0 |
-| DualLAAT | 99.4±0.0 | 97.6±0.0 | 58.4±0.1 | 32.1±0.1 | 70.3±0.0 | 55.3±0.0 | 58.5±0.1 | 62.9±0.0 |
-| DualLAAT (trained on frequent codes) | 99.4±0.0 | 97.4±0.1 | 59.0±0.1 | 30.8±0.1 | 70.9±0.1 | 55.7±0.1 | 59.0±0.1 | 63.5±0.1 |
+| DualLAAT | **99.4±0.0** | **97.6±0.0** | 58.4±0.1 | **32.1±0.1** | 70.3±0.0 | 55.3±0.0 | 58.5±0.1 | 62.9±0.0 |
+| DualLAAT (trained on frequent codes) | **99.4±0.0** | 97.4±0.1 | **59.0±0.1** | 30.8±0.1 | **70.9±0.1** | **55.7±0.1** | **59.0±0.1** | **63.5±0.1** |
 
 
 ### MIMIC-IV ICD-9
@@ -36,8 +36,8 @@ The evaluation is based on the SIGIR 2023 paper [Automated Medical Coding on MIM
 |---|---|---|---|---|---|---|---|---|
 | PLM-ICD (Previous SoTA) | 99.4±0.0 | 97.2±0.2 | 62.6±0.3 | 29.8±1.0 | 70.0±0.2 | 53.5±0.2 | 62.7±0.3 | 68.0±0.3  |
 | DualLAAT-cnn | 99.4±0.0 | 97.5±0.0 | 61.3±0.1 | 29.1±0.2 | 69.7±0.0 | 53.2±0.0 | 62.3±0.0 | 67.6±0.0 |
-| DualLAAT | 99.5±0.0 | 97.7±0.0 | 63.5±0.1 | 34.9±0.1 | 71.1±0.1 | 54.4±0.0 | 63.9±0.0 | 69.5±0.0 |
-| DualLAAT (trained on frequent codes) | 99.5±0.0 | 97.5±0.1 | 63.4±0.1 | 34.9±0.2 | 70.9±0.1 | 54.3±0.0 | 63.7±0.1 | 69.2±0.1 |
+| DualLAAT | **99.5±0.0** | **97.7±0.0** | **63.5±0.1** | **34.9±0.1** | **71.1±0.1** | **54.4±0.0** | **63.9±0.0** | **69.5±0.0** |
+| DualLAAT (trained on frequent codes) | **99.5±0.0** | 97.5±0.1 | 63.4±0.1 | **34.9±0.2** | 70.9±0.1 | 54.3±0.0 | 63.7±0.1 | 69.2±0.1 |
 
 
 ### MIMIC-III
@@ -46,8 +46,8 @@ The evaluation is based on the SIGIR 2023 paper [Automated Medical Coding on MIM
 |---|---|---|---|---|---|---|---|---|
 | PLM-ICD (Previous SoTA) | 98.9±0.0 | 95.9±0.1 | 59.6±0.2 | 26.6±0.8 | 72.1±0.2 | 56.5±0.1 | 60.1±0.1 | 64.6±0.2  |
 | DualLAAT-cnn | 99.1±0.0 | 96.5±0.1 | 58.4±0.1 | 27.2±0.1 | 72.8±0.0 | 57.0±0.0 | 60.7±0.1 | 65.5±0.1 |
-| DualLAAT | 99.2±0.0 | 96.9±0.1 | 61.8±0.1 | 33.1±0.2 | 75.1±0.1 | 58.9±0.1 | 62.9±0.1 | 68.2±0.1 |
-| DualLAAT (trained on frequent codes) | 99.2±0.0 | 96.8±0.0 | 61.6±0.1 | 32.7±0.5 | 75.0±0.1 | 58.9±0.1 | 63.0±0.0 | 68.2±0.1 |
+| DualLAAT | **99.2±0.0** | **96.9±0.1** | **61.8±0.1** | **33.1±0.2** | **75.1±0.1** | **58.9±0.1** | 62.9±0.1 | **68.2±0.1** |
+| DualLAAT (trained on frequent codes) | **99.2±0.0** | 96.8±0.0 | 61.6±0.1 | 32.7±0.5 | **75.0±0.1** | **58.9±0.1** | **63.0±0.0** | **68.2±0.1** |
 
 
 ## Installation
