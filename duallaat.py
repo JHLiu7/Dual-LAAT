@@ -332,13 +332,18 @@ class DualLAAT(nn.Module):
     
 
     def tokenize(
-        self, 
-        note_inputs: Optional[Union[str, List[str]]] = None, 
+        self,
+        note_inputs: Optional[Union[str, List[str]]] = None,
         code_inputs: Optional[Union[str, List[str]]] = None,
         preprocess: bool = True,
         token2id: Optional[Dict[str, int]] = None
     ) -> Dict[str, torch.Tensor]:
-        """Tokenize note and code inputs."""
+        """Tokenize note and code inputs.
+
+        When `preprocess=True`, both notes and code descriptions are routed
+        through the same `TextPreprocessor` used at training time, so that
+        punctuation in user-supplied code descriptions does not produce OOVs.
+        """
 
         assert note_inputs is not None or code_inputs is not None, "At least one of note_inputs or code_inputs must be provided."
 
@@ -352,18 +357,25 @@ class DualLAAT(nn.Module):
         if token2id is not None:
             self.token2id = token2id
 
-        # Preprocess note inputs
-        if preprocess and note_inputs is not None:
+        # Preprocess note and code inputs through the same pipeline as training:
+        # lowercase + strip non-alphanumerics + collapse whitespace.
+        if preprocess:
             text_preprocessor = TextPreprocessor()
-            note_inputs = [text_preprocessor(text) for text in note_inputs]
+            if note_inputs is not None:
+                note_inputs = [text_preprocessor(text) for text in note_inputs]
+            if code_inputs is not None:
+                code_inputs = [text_preprocessor(code) for code in code_inputs]
 
-        # Preprocess code inputs
-        if preprocess and code_inputs is not None:
-            code_inputs = [code.lower() for code in code_inputs]
-            max_desc_length = max([len(desc.split()) for desc in code_inputs])
+        # Determine truncation length for codes (used whether or not we preprocessed).
+        if code_inputs is not None:
+            max_desc_length = max(len(desc.split()) for desc in code_inputs) if code_inputs else 0
             if max_desc_length > self.config.max_code_length:
-                logger.warning(f"Some code descriptions exceed max_code_length of {self.config.max_code_length}. They will be truncated.")
+                logger.warning(
+                    f"Some code descriptions exceed max_code_length of "
+                    f"{self.config.max_code_length}. They will be truncated."
+                )
                 max_desc_length = self.config.max_code_length
+            max_desc_length = max(max_desc_length, 1)  # never zero-width
 
         # Tokenize inputs
         output = {}
@@ -378,13 +390,13 @@ class DualLAAT(nn.Module):
 
 
     def predict(
-        self, 
-        notes_to_code: Union[str, List[str]], 
+        self,
+        notes_to_code: Union[str, List[str]],
         codes_to_consider: Union[str, List[str]],
         token2id: Optional[Dict[str, int]] = None,
         preprocess: bool = True,
         batch_size: int = 32,
-    ) -> Union[torch.Tensor, tuple]:
+    ) -> Dict[str, torch.Tensor]:
         """Predict similarity scores for text-code pairs."""
         self.eval()
 
@@ -395,32 +407,26 @@ class DualLAAT(nn.Module):
 
         device = next(self.parameters()).device
 
+        # Encode code inputs (shared across all note batches)
+        input_code = self.tokenize(
+            note_inputs=None, code_inputs=codes_to_consider,
+            preprocess=preprocess, token2id=token2id,
+        )['input_code'].to(device)
 
-        # Encode code inputs
-        input_code = self.tokenize(note_inputs=None, code_inputs=codes_to_consider, preprocess=preprocess, token2id=token2id)['input_code']
+        # Tokenize notes
+        input_text = self.tokenize(
+            note_inputs=notes_to_code, code_inputs=None,
+            preprocess=preprocess, token2id=token2id,
+        )['input_text']
 
-        # Tokenize notes 
-        if isinstance(notes_to_code, str):
-            note_inputs = notes_to_code
-        else:
-            note_inputs = notes_to_code
-
-        input_text = self.tokenize(note_inputs=note_inputs, code_inputs=None, preprocess=preprocess, token2id=token2id)['input_text']
-
+        num_notes = input_text.shape[0]
+        num_batches = (num_notes + batch_size - 1) // batch_size
 
         all_logits = []
-        num_batches = (len(notes_to_code) + batch_size - 1) // batch_size
-        for i in tqdm(range(0, len(notes_to_code), batch_size), desc="Inferencing on notes", total=num_batches):
-            batch_inputs = {
-                "input_text": input_text[i:i+batch_size],
-                "input_code": input_code
-            }
-
+        for i in tqdm(range(0, num_notes, batch_size), desc="Inferencing on notes", total=num_batches):
+            batch_text = input_text[i:i + batch_size].to(device)
             with torch.no_grad():
-                # Move to same device as model
-                batch_inputs = {k: v.to(device) for k, v in batch_inputs.items()}
-
-                logits = self.forward(**batch_inputs)
+                logits = self.forward(input_text=batch_text, input_code=input_code)
                 all_logits.append(logits.cpu())
 
         all_logits = torch.cat(all_logits, dim=0)

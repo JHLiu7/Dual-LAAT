@@ -1,21 +1,17 @@
-import json
-import os
-import torch
 import copy
-import logging 
-import pandas as pd
-import numpy as np
-import datasets
-import lightning as L
-import torch
-import pickle
 import json
-import random
 import logging
-from torch.utils.data import Sampler, Dataset, DataLoader
-from typing import List, Set, Optional
+import os
+import random
+
+import lightning as L
+import numpy as np
+import pandas as pd
+import torch
 from collections import defaultdict
 from dataclasses import dataclass
+from torch.utils.data import Dataset, Sampler, DataLoader
+from typing import Optional
 
 
 from src.utils import ICD_TARGET_FREQURNCIES, _get_file_paths, _load_data_df_and_codes, _split_data, _get_codes_for_sampling
@@ -97,8 +93,11 @@ class W2vTextDataModule(L.LightningDataModule):
         self.pad_token_id = self.token2id['<PAD>']
 
         max_desc_len = max([len(desc.split()) for desc in all_code_descriptions])
-        self.label2description = {code: self.encode_text(desc, max_length=max_desc_len) 
+        self.label2description = {code: self.encode_text(desc, max_length=max_desc_len)
             for code, desc in zip(all_codes, all_code_descriptions)}
+        # Keep raw (lowercased) descriptions so callers can compute things like
+        # same-description code pairs without re-loading the source files.
+        self.label2raw_description = dict(zip(all_codes, all_code_descriptions))
         
         if self.negative_sampling_strategy == 'embeddings' and label2embeddings is not None:
             # Convert label2embeddings to tensor
@@ -255,11 +254,7 @@ def sample_negatives(pos_labels, all_labels, target_space, repeated_labels=None,
     neg_candidates = [l for l in all_labels if l not in pos_labels]
 
     if repeated_labels is not None:
-        num_neg_old = len(neg_candidates)
         neg_candidates = [l for l in neg_candidates if l not in repeated_labels]
-        num_neg_new = len(neg_candidates)
-        # if num_neg_new < num_neg_old:
-        #     logging.info(f"Filtered negative candidates: {num_neg_old} -> {num_neg_new}")
 
     num_negatives = target_space - len(pos_labels)
 
@@ -286,18 +281,12 @@ def sample_negatives(pos_labels, all_labels, target_space, repeated_labels=None,
 
         # Get the top indices for each positive embedding
         top_matrix = similarity_matrix.argsort(dim=1, descending=True)
-        # logging.info(f"Top matrix shape: {top_matrix.shape}")
 
+        # Greedy round-robin: at each rank, take the top-ranked negative for
+        # every positive label, accumulating until we have enough.
         final_neg_indices = set()
         for i in range(top_matrix.shape[1]):
-            # Get the top indices at each position
-            # This will give us the indices of the top negative candidates for each positive label
-            top_indices_per_rank = top_matrix[:, i]
-
-            # Convert to a set to ensure uniqueness
-            unique_indices = set(top_indices_per_rank.tolist())
-            final_neg_indices.update(unique_indices)
-
+            final_neg_indices.update(top_matrix[:, i].tolist())
             if len(final_neg_indices) >= num_negatives:
                 break
 
@@ -334,39 +323,51 @@ def onehot_encode_target(labels, label2id=None, batch_labels=None):
 
 
 
+def build_code_to_partner_from_descriptions(label2raw_desc: dict) -> dict:
+    """Group codes by their (raw, lowercased) description text.
+
+    Returns a `code -> partner_code` mapping for codes that share their
+    description with exactly one other code. Used to avoid sampling a code's
+    description-twin as a negative.
+    """
+    desc2codes = defaultdict(list)
+    for code, desc in label2raw_desc.items():
+        desc2codes[desc].append(code)
+    code_to_partner = {}
+    for codes in desc2codes.values():
+        if len(codes) == 2:
+            code_to_partner[codes[0]] = codes[1]
+            code_to_partner[codes[1]] = codes[0]
+    return code_to_partner
+
+
 @dataclass
 class ICDCollatorWithSampling:
     target_space: int
     icdtype2label2desc: dict
-    # label2desc_iv_icd10: dict
-    # label2desc_iv_icd9: dict
-    # label2desc_iii_icd9: Optional[dict] = None
-    # label2embeddings_iv_icd10: Optional[dict] = None
-    # label2embeddings_iv_icd9: Optional[dict] = None
-    # label2embeddings_iii_icd9: Optional[dict] = None
     icdtype2label2embeddings: Optional[dict] = None
 
+    icdtype2code_to_partner: Optional[dict] = None
     codes_with_same_descriptions: Optional[dict] = None
     pad_token_id: Optional[int] = None
 
     def __post_init__(self):
-        self.collate_fn = self.w2v_collate_fn_with_label_sampling        
+        self.collate_fn = self.w2v_collate_fn_with_label_sampling
 
-        if self.codes_with_same_descriptions is not None:
-            self.code_to_repetition = defaultdict(dict)
+        self.code_to_repetition = defaultdict(dict)
 
+        if self.icdtype2code_to_partner is not None:
+            for icd_type, mapping in self.icdtype2code_to_partner.items():
+                self.code_to_repetition[icd_type] = dict(mapping)
+        elif self.codes_with_same_descriptions is not None:
             for key in self.codes_with_same_descriptions.keys():
                 same_desc_codes = self.codes_with_same_descriptions[key]
-                key = key.replace('mimic', '')
+                icd_type = key.replace('mimic', '')
 
                 for _, codes in same_desc_codes.items():
                     assert len(codes) == 2
-                    self.code_to_repetition[key][codes[0]] = codes[1]
-                    self.code_to_repetition[key][codes[1]] = codes[0]
-
-            assert 'iv_icd10' in self.code_to_repetition
-            assert 'iv_icd9' in self.code_to_repetition
-            assert 'iii_icd9' in self.code_to_repetition
+                    self.code_to_repetition[icd_type][codes[0]] = codes[1]
+                    self.code_to_repetition[icd_type][codes[1]] = codes[0]
 
 
     def __call__(self, batch, *args, **kwargs):
@@ -464,19 +465,6 @@ def prepare_dataloaders(cfg):
     val_loader_dict = {}
     test_loader_dict = {}
 
-    # if '+' not in icd_type:
-    #     dm = _get_train_module(cfg, icd_type)
-
-    #     train_loader = dm.train_dataloader()
-
-    #     val_loaders, test_loaders = _get_val_and_test_loaders(cfg, icd_type)
-    #     val_loader_dict.update(val_loaders)
-    #     test_loader_dict.update(test_loaders)
-    # else:
-
-
-    ## Prepare multiple ICD types
-    
 
     alternative_data_folders = []
     alternative_icd_types = []
@@ -550,33 +538,45 @@ def prepare_dataloaders(cfg):
     
     # Prepare data functions
 
-    codes_with_same_descriptions = json.load(open(os.path.join(cfg.data_dir, 'coding_data/same_desc_codes.json'), 'r'))
     icdtype2label2desc = {
-        key: {k: torch.tensor(v) for k, v in dm.label2description.items()} 
+        key: {k: torch.tensor(v) for k, v in dm.label2description.items()}
         for key, dm in train_data_modules.items()
     }
     icdtype2label2embeddings = {
         key: dm.label2embeddings for key, dm in train_data_modules.items()
     }
 
+    # Prefer the on-the-fly computation from raw descriptions, falling back to
+    # the legacy `same_desc_codes.json` file if it happens to be present.
+    same_desc_path = os.path.join(cfg.data_dir, 'coding_data/same_desc_codes.json')
+    codes_with_same_descriptions = None
+    icdtype2code_to_partner = {
+        key: build_code_to_partner_from_descriptions(dm.label2raw_description)
+        for key, dm in train_data_modules.items()
+    }
+    n_partners = sum(len(m) for m in icdtype2code_to_partner.values())
+    if os.path.exists(same_desc_path):
+        logging.info(f"Loading same-description code pairs from {same_desc_path}")
+        with open(same_desc_path, 'r') as f:
+            codes_with_same_descriptions = json.load(f)
+        icdtype2code_to_partner = None  # legacy path takes priority when present
+    else:
+        logging.info(
+            f"`same_desc_codes.json` not found at {same_desc_path}; "
+            f"computed {n_partners} same-description partner entries on the fly."
+        )
+
     collator = ICDCollatorWithSampling(
         target_space=cfg.label_space,
         icdtype2label2desc=icdtype2label2desc,
         icdtype2label2embeddings=icdtype2label2embeddings,
-        # label2desc_iv_icd10=train_data_modules['iv_icd10'].label2description,
-        # label2desc_iv_icd9=train_data_modules['iv_icd9'].label2description,
-        # label2desc_iii_icd9=train_data_modules['iii_icd9'].label2description if 'iii_icd9' in train_data_modules else None,
-
-        # label2embeddings_iv_icd10=train_data_modules['iv_icd10'].label2embeddings,
-        # label2embeddings_iv_icd9=train_data_modules['iv_icd9'].label2embeddings,
-        # label2embeddings_iii_icd9=train_data_modules['iii_icd9'].label2embeddings if 'iii_icd9' in train_data_modules else None,
-
+        icdtype2code_to_partner=icdtype2code_to_partner,
         codes_with_same_descriptions=codes_with_same_descriptions,
         pad_token_id=list(train_data_modules.values())[0].pad_token_id
     )
 
     train_loader = torch.utils.data.DataLoader(
-        concat_train_dataset, #batch_size=cfg.batch_size, shuffle=True,
+        concat_train_dataset,
         collate_fn=collator, num_workers=cfg.num_workers,
         batch_sampler=ICDSampler(
             dataset=concat_train_dataset,

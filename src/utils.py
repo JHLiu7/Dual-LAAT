@@ -1,3 +1,4 @@
+import ast
 import os
 import yaml
 
@@ -86,11 +87,14 @@ def _get_file_paths(data_dir, icd_type, data_w2v_dir=None, alternative_data_fold
         data_w2v_dir = os.path.join(data_dir, 'w2v')
     token2id_file_path = os.path.join(data_w2v_dir, 'token2id.pkl')
 
-    if icd_type == 'iii_icd9':
-        split_file_path = os.path.join(data_dir, 'splits/mimiciii_clean_splits.feather')
-    else:
-        split_file_path = os.path.join(data_dir, f'splits/mimic{icd_type}_split.feather')
-    
+    # Standardize on '{splits_dir}/mimic{icd_type}_split.feather' for all datasets.
+    # Fall back to the legacy 'mimiciii_clean_splits.feather' name if present.
+    split_file_path = os.path.join(data_dir, f'splits/mimic{icd_type}_split.feather')
+    if icd_type == 'iii_icd9' and not os.path.exists(split_file_path):
+        legacy = os.path.join(data_dir, 'splits/mimiciii_clean_splits.feather')
+        if os.path.exists(legacy):
+            split_file_path = legacy
+
     return code_description_file_path, data_file_path, token2id_file_path, split_file_path
 
 
@@ -304,17 +308,18 @@ def update_config(config_path="configs/config.yaml", overrides=None):
                 if k not in d:
                     d[k] = {}
                 d = d[k]
-            # Attempt to cast value to appropriate type
-            try:
-                # Handle boolean values
-                if value.lower() == 'true':
-                    value = True
-                elif value.lower() == 'false':
-                    value = False
-                else:
-                    value = eval(value)
-            except:
-                pass  # Keep as string if casting fails
+            # Attempt to cast value to appropriate type using a safe literal parser
+            if value.lower() == 'true':
+                value = True
+            elif value.lower() == 'false':
+                value = False
+            elif value.lower() in ('null', 'none'):
+                value = None
+            else:
+                try:
+                    value = ast.literal_eval(value)
+                except (ValueError, SyntaxError):
+                    pass  # Keep as string if it's not a Python literal
             d[keys[-1]] = value
 
     return as_namespace(config)
@@ -346,10 +351,13 @@ def get_trainer(cfg):
 
     if hasattr(cfg, 'patience'):
         logging.info(f"Using early stopping with patience: {cfg.patience}")
-        icd_type = 'iv_icd10'  
-        target_freq = 'frequent'
+        # Monitor the primary ICD type the user is training on. For multi-dataset
+        # training (e.g. 'iv_icd10+iv_icd9+iii_icd9'), use the first listed type.
+        icd_type = cfg.icd_type.split('+')[0]
+        target_freq = cfg.icd_target_frequency
 
         score = f'hp/{icd_type}_{target_freq}'
+        logging.info(f"Early stopping monitors: {score}")
         
         early_stopping_callback = L.pytorch.callbacks.EarlyStopping(
             monitor=score,

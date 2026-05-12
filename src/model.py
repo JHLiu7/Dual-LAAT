@@ -29,13 +29,9 @@ class LitModel(L.LightningModule):
                 dropout=cfg.dropout,
                 num_mha_heads=cfg.num_mha_heads,
                 projection_dim=cfg.projection_dim,
-                dual_attention=cfg.dual_attention,
-                dual_attention_lambda=cfg.dual_attention_lambda,
             )
             self.save_hyperparameters({
                 'model_type': cfg.model_type,
-                'dual_attention': cfg.dual_attention,
-                'dual_attention_lambda': cfg.dual_attention_lambda,
                 'kernel_size': cfg.kernel_size,
                 'num_filters': cfg.num_filters,
                 'dropout': cfg.dropout,
@@ -140,18 +136,20 @@ class LitModel(L.LightningModule):
         self.log('val_loss', loss)
         if dataloader_idx is None:
             dataloader_idx = 0
+        # Detach + CPU before accumulating: full-vocab eval over many batches
+        # otherwise pins gigabytes of label-space tensors to GPU memory.
         self.validation_step_output_dict[dataloader_idx].append({
-            'logits': logits,
-            'y': y,
+            'logits': logits.detach().cpu(),
+            'y': y.detach().cpu(),
             'icd_type': icd_type
         })
         return loss
-    
+
     def test_step(self, batch, batch_idx, dataloader_idx=None):
         loss, logits, y, icd_type = self.step(batch, batch_idx)
         self.test_step_output.append({
-            'logits': logits,
-            'y': y,
+            'logits': logits.detach().cpu(),
+            'y': y.detach().cpu(),
             'icd_type': icd_type
         })
         return loss
@@ -167,10 +165,9 @@ class LitModel(L.LightningModule):
         }
 
     def _evaluate(self, step_outputs):
+        # Tensors are already detached + on CPU at this point (see validation_step / test_step).
         y_hats = torch.cat([x['logits'] for x in step_outputs])
         ys = torch.cat([x['y'] for x in step_outputs])
-        y_hats = y_hats.cpu().detach()
-        ys = ys.cpu().detach()
 
         icd_types = [x['icd_type'] for x in step_outputs]
         assert len(set(icd_types)) == 1

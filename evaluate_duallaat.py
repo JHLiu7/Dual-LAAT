@@ -16,33 +16,62 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-def load_mimic_codes_to_consider(dataset, code_scope, resource_dir='./'):
-    """Load MIMIC codes and descriptions."""
-    code_scopes = json.load(open(os.path.join(resource_dir, 'code_scopes.json'), 'r'))
-    code_descriptions = json.load(open(os.path.join(resource_dir, 'code_descriptions.json'), 'r'))
-    
+def load_mimic_codes_to_consider(dataset, code_scope, resource_dir=None):
+    """Load MIMIC codes and descriptions.
+
+    By default, `code_scopes.json` and `code_descriptions.json` are looked
+    up under `./data/` (relative to this script), which is where they live
+    in the repo.
+    """
+    if resource_dir is None:
+        resource_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data')
+
+    with open(os.path.join(resource_dir, 'code_scopes.json'), 'r') as f:
+        code_scopes = json.load(f)
+    with open(os.path.join(resource_dir, 'code_descriptions.json'), 'r') as f:
+        code_descriptions = json.load(f)
+
     code2id = code_scopes[f'dataset:{dataset}'][f'code_scope:{code_scope}']
     code2desc = code_descriptions[dataset.split('_')[-1]]
-    
+
     code_candidates = [code2desc[code] for code in code2id]
     return code_candidates, code2id
+
+
+def _resolve_split_path(splits_dir: str, dataset: str) -> str:
+    """Find the splits file for `dataset`, accepting either the standard
+    '{dataset}_split.feather' name or the legacy '{dataset}_splits.feather'
+    (plural) and 'mimiciii_clean_splits.feather'.
+    """
+    candidates = [
+        f'{dataset}_split.feather',
+        f'{dataset}_splits.feather',
+    ]
+    if dataset == 'mimiciii_icd9':
+        candidates.append('mimiciii_clean_splits.feather')
+
+    for name in candidates:
+        path = os.path.join(splits_dir, name)
+        if os.path.exists(path):
+            return path
+    raise FileNotFoundError(
+        f"Could not find a splits file for '{dataset}' under {splits_dir}. "
+        f"Tried: {candidates}"
+    )
 
 
 def load_test_data(dataset, data_dir='./data', split='test'):
     """Load test data for evaluation."""
     logger.info(f"Loading {split} data for {dataset}")
-    
-    # Load main dataset
-    # df = pd.read_feather(os.path.join(data_dir, 'coding_data', f'{dataset}.feather'))
-    df = pd.read_feather(os.path.join(data_dir,  f'{dataset}.feather'))
-    
-    # Load splits
-    split_df = pd.read_feather(os.path.join(data_dir, 'splits', f'{dataset}_split.feather'))
+
+    df = pd.read_feather(os.path.join(data_dir, f'{dataset}.feather'))
+
+    split_path = _resolve_split_path(os.path.join(data_dir, 'splits'), dataset)
+    split_df = pd.read_feather(split_path)
     split_ids = split_df[split_df['split'] == split]['_id'].tolist()
-    
-    # Filter data
+
     test_df = df[df['_id'].isin(split_ids)].reset_index(drop=True)
-    
+
     logger.info(f"Loaded {len(test_df)} {split} samples")
     return test_df
 

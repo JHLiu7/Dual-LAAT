@@ -94,7 +94,7 @@ candidate_codes = {
     "E11.9": "Type 2 diabetes mellitus without complications",
     "J44.9": "Chronic obstructive pulmonary disease, unspecified",
     "F41.1": "Generalized anxiety disorder",
-    "M54.5": "Low back pain"
+    "M54.5": "Low back pain",
 }
 
 # ============================================
@@ -102,23 +102,33 @@ candidate_codes = {
 # Ground truth codes: I10, M54.5
 # ============================================
 clinical_note = """
-Patient is a 62-year-old male presenting for routine follow-up. He has a 
-history of essential hypertension, currently managed with lisinopril 10mg 
-daily with good control. Blood pressure today is 128/82. Patient also reports 
-chronic low back pain that has been present for the past 6 months, worse with 
-prolonged sitting. Pain is managed with NSAIDs and physical therapy. No 
+Patient is a 62-year-old male presenting for routine follow-up. He has a
+history of essential hypertension, currently managed with lisinopril 10mg
+daily with good control. Blood pressure today is 128/82. Patient also reports
+chronic low back pain that has been present for the past 6 months, worse with
+prolonged sitting. Pain is managed with NSAIDs and physical therapy. No
 radiating symptoms or neurological deficits noted on examination.
 """
 
-# Make predictions
+# Make predictions: returns {'logits': (N, C), 'probabilities': (N, C)} where
+# N is the number of notes and C is the number of candidate codes.
+codes = list(candidate_codes.keys())
+descriptions = list(candidate_codes.values())
 results = model.predict(
     notes_to_code=clinical_note,
-    codes_to_consider=list(candidate_codes.values()),
+    codes_to_consider=descriptions,
 )
 
-# Get predicted probabilities (after sigmoid)
-predictions = results['probabilities']
-print(predictions)
+probs = results['probabilities'][0]  # one note → one row
+
+# Inspect per-code probabilities
+for code, desc, p in sorted(zip(codes, descriptions, probs), key=lambda x: -x[2]):
+    print(f"{code:>6}  {p.item():.3f}  {desc}")
+
+# Threshold for a multi-label prediction. 0.5 is a sensible default; for the
+# benchmark numbers in the tables below we tuned per-dataset on val.
+predicted_codes = [code for code, p in zip(codes, probs) if p > 0.5]
+print("Predicted:", predicted_codes)
 ```
 
 ## Data Preparation
@@ -152,11 +162,28 @@ python evaluate_duallaat.py \
 
 ### Basic Training
 
-Train a DualLAAT model using a configuration file:
+Train a DualLAAT model on a single dataset using a configuration file:
 
 ```bash
 python train.py --config configs/laat.yaml
 ```
+
+### Reproducing the version-agnostic results
+
+The numbers reported in the evaluation tables come from training one model
+jointly on MIMIC-III ICD-9, MIMIC-IV ICD-9, and MIMIC-IV ICD-10:
+
+```bash
+python train.py --config configs/laat_multi.yaml
+```
+
+Edit `data_dir`, `data_w2v_dir`, `output_dir`, and (optionally) `seed` in
+that file before running. See [data/README.md](data/README.md) for how to
+produce the processed feather files and the word2vec embeddings.
+
+At the end of training, in addition to the Lightning checkpoint, a
+`duallaat/` subfolder is written under `output_dir` that can be loaded
+directly with `DualLAAT.from_pretrained(...)`.
 
 ### Custom Training
 
@@ -183,19 +210,16 @@ python train.py \
 - `lr`: Learning rate
 - `dropout`: Dropout rate
  -->
+ 
+<!-- 
+## Citation
 
-<!-- ## Citation
-
-If you use this code in your research, please cite:
+If you use this code or the released checkpoints in your research, please cite:
 
 ```bibtex
-@article{duallaat2024,
-  title={DualLAAT: Dual Label-Aware Attention for Automated ICD Coding},
-  author={Your Name},
-  journal={arXiv preprint},
-  year={2024}
-}
+
 ``` -->
+
 
 ## Acknowledgments
 
